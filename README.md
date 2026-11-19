@@ -4,14 +4,31 @@ A PyTorch optimizer that applies Muon and AdamW to separate parameter groups. Fo
 
 [Package version](src/hybrid_muon/__init__.py) · Python 3.10+ · PyTorch 2.10+
 
-## Install and use
+## Installation
 
-From the repository root:
+### Option 1: Clone and install locally
 
 ```sh
+git clone https://github.com/JamePeng/hybrid_muon.git
+cd hybrid_muon
 python -m pip install -e .
+```
+
+The editable install picks up changes you make in the clone.
+
+### Option 2: Install directly from GitHub
+
+```sh
+python -m pip install "git+https://github.com/JamePeng/hybrid_muon.git"
+```
+
+After either installation, print the installed version:
+
+```sh
 python -c "import hybrid_muon; print(hybrid_muon.__version__)"
 ```
+
+## Usage
 
 Pass your model after attaching any optional modules and setting which parameters to train. The constructor accepts separate learning rates for Muon and AdamW.
 
@@ -24,6 +41,55 @@ for group in optimizer.param_groups:
 ```
 
 Use `optimizer.zero_grad()` and `optimizer.step()` in your existing training loop.
+
+## TRL SFTTrainer
+
+For single-GPU or ordinary DDP training with an existing optimizer instance, pass `optimizers=(optimizer, None)` to `SFTTrainer` to let Trainer build the scheduler. For a script that also runs with DeepSpeed, override `create_optimizer` as shown below. This lets Trainer recreate the same parameter groups when initializing DeepSpeed. The example assumes an FP32 model, its tokenizer, a TRL training dataset, and a BF16-capable GPU.
+
+```python
+from trl import SFTConfig, SFTTrainer
+from hybrid_muon import HybridMuonAdamW
+
+
+class HybridSFTTrainer(SFTTrainer):
+    def create_optimizer(self, model=None):
+        if self.optimizer is None:
+            self.optimizer = HybridMuonAdamW(
+                self.model if model is None else model,
+                muon_config={"lr": 5e-5},
+                adamw_lr=1.5e-5,
+            )
+        return self.optimizer
+
+
+args = SFTConfig(output_dir="checkpoints", bf16=True, lr_scheduler_type="linear")
+trainer = HybridSFTTrainer(
+    model=model,
+    args=args,
+    processing_class=tokenizer,
+    train_dataset=train_dataset,
+)
+trainer.train()
+```
+
+Trainer handles gradient accumulation, scheduling, and optimizer steps. The linear scheduler scales both groups from their own initial learning rates. For ordinary DDP, launch the same script with one process per GPU, for example `torchrun --standalone --nproc-per-node=2 train_sft.py` for a user script named `train_sft.py`. At least one matching projection weight must be trainable. Adapter-only LoRA runs that freeze every matching weight will fail the Muon group check. [TRL SFTTrainer](https://huggingface.co/docs/trl/sft_trainer)
+
+**With DeepSpeed**, use the same trainer subclass and replace the `args` assignment with the stage 0 configuration below. Set Trainer's precision flags explicitly so DeepSpeed's `torch_autocast` owns BF16 computation. When using Accelerate's launcher, select `--mixed_precision no` for this configuration.
+
+```python
+args = SFTConfig(
+    output_dir="checkpoints",
+    bf16=False,
+    fp16=False,
+    lr_scheduler_type="linear",
+    deepspeed={
+        "train_micro_batch_size_per_gpu": "auto",
+        "gradient_accumulation_steps": "auto",
+        "zero_optimization": {"stage": 0},
+        "torch_autocast": {"enabled": True, "dtype": "bfloat16"},
+    },
+)
+```
 
 ## Parameter groups
 
@@ -65,11 +131,61 @@ The local experiment `optimizer-lr-validation-2026-09-26` tested an earlier impl
 
 At the matched matrix learning rate of `5e-5`, Hybrid used **207.6 MiB less peak allocated memory**. The expected saving from one fewer FP32 buffer across 54,525,952 matrix parameters is **208.0 MiB**.
 
-## DDP and checkpoints
+## Multi-GPU training
 
-Use full parameter matrices on a single device or on each ordinary DistributedDataParallel (DDP) rank. Attach optional modules before wrapping the model in DDP, pass `ddp_model.module` to the optimizer, and run the forward pass through `ddp_model`.
+Muon orthogonalizes each projection's update as a complete 2D matrix. The choice of distributed strategy determines which tensors the optimizer sees at `step()`.
 
-Save `optimizer.state_dict()` alongside the model state. To resume, rebuild the same model and optimizer with the same trainable parameter names and group order, then call `optimizer.load_state_dict(saved_optimizer_state)`.
+| Strategy | What this means for HybridMuonAdamW |
+| --- | --- |
+| PyTorch DistributedDataParallel (DDP) | Each rank holds the full model and optimizer state. DDP averages gradients before each rank applies the same update. |
+| DeepSpeed ZeRO stage 0 | ZeRO is disabled. BF16 autocast runs eligible operations in BF16 while the optimizer updates complete FP32 matrices. |
+| DeepSpeed ZeRO stages 1 and 2 | The standard wrapper passes flat parameter partitions to the underlying optimizer even though model weights are replicated. This package's `step()` requires the original 2D projection matrices. |
+| DeepSpeed ZeRO stage 3 | Unsupported. Model parameters are partitioned as well. Gathering weights for the forward pass does not supply complete matrix updates at optimizer step time. |
+
+**ZeRO-2 and Muon.** JamePeng has run Qwen3 SFT with ZeRO-2. The standalone training script defines its own optimizer; the packaged `HybridMuonAdamW` has a separate update implementation. DeepSpeed also has a ZeRO-aware path for its own `MuonWithAuxAdam`. That path handles matrix boundaries inside the ZeRO wrapper. Passing this package's optimizer to the standard wrapper does not select that path. [DeepSpeed ZeRO optimizer implementation](https://github.com/deepspeedai/DeepSpeed/blob/b5e0ba67f2757af1e2003fba9dc362db042a5ffe/deepspeed/runtime/zero/stage_1_and_2.py)
+
+### PyTorch DDP
+
+Launch one process per GPU and give each rank its own batch, for example with a `DistributedSampler`. After initializing the process group, move the model to the rank's GPU, attach or freeze any optional modules on that device, and wrap it in DDP. Construct `HybridMuonAdamW(ddp_model.module)` and compute the loss through `ddp_model(**batch)`. The repository's two-process CPU/Gloo test compares three DDP steps with a single-process run on the combined batch.
+
+On BF16-capable GPUs, keep the model parameters in FP32 and enable BF16 autocast around the forward pass:
+
+```python
+optimizer.zero_grad(set_to_none=True)
+with torch.autocast("cuda", dtype=torch.bfloat16):
+    loss = ddp_model(**batch).loss
+loss.backward()
+optimizer.step()
+```
+
+For a replicated checkpoint, one rank can save `ddp_model.module.state_dict()` and `optimizer.state_dict()`. On resume, restore both on every rank using the same trainable parameter names and group order.
+
+### DeepSpeed stage 0
+
+Launch one process per BF16-capable GPU. Load the unwrapped model in FP32 (for Transformers, pass `dtype=torch.float32` to `from_pretrained`), move it to the rank's GPU, and pass the optimizer instance to `deepspeed.initialize`. The following configuration enables BF16 autocast for the forward pass and sets a per-GPU batch size of one.
+
+```python
+import deepspeed
+from hybrid_muon import HybridMuonAdamW
+
+optimizer = HybridMuonAdamW(model, muon_config={"lr": 5e-5}, adamw_lr=1.5e-5)
+engine, _, _, _ = deepspeed.initialize(
+    model=model,
+    optimizer=optimizer,
+    config={
+        "train_micro_batch_size_per_gpu": 1,
+        "zero_optimization": {"stage": 0},
+        "torch_autocast": {"enabled": True, "dtype": "bfloat16"},
+    },
+)
+loss = engine(**batch).loss
+engine.backward(loss)
+engine.step()
+```
+
+If adapting an existing DeepSpeed config, replace its native `bf16` or `fp16` block with the `torch_autocast` block above. Native precision modes can wrap the optimizer and flatten its matrices. Leave the JSON `optimizer` entry unset so the engine uses the supplied instance. [DeepSpeed mixed precision](https://deepspeed.readthedocs.io/en/stable/training.html#mixed-precision-training)
+
+Setting `zero_allow_untested_optimizer` only changes DeepSpeed's optimizer check. It does not add support for sharded updates. For checkpointing, call `engine.save_checkpoint(directory, tag=tag)` on every rank with the same tag and use `engine.load_checkpoint(directory, tag=tag)` to resume. [DeepSpeed ZeRO stages](https://deepspeed.readthedocs.io/en/stable/zero3.html) · [Checkpoint API](https://deepspeed.readthedocs.io/en/stable/model-checkpointing.html)
 
 ## References
 

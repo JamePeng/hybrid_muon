@@ -202,4 +202,10 @@ Pretraining examples include [Kimi K2](https://arxiv.org/html/2507.20534v1#S2.SS
 
 JamePeng · <jame_peng@sina.com>
 
-[Apache-2.0](LICENSE). The Newton-Schulz iteration is adapted from [KellerJordan/Muon](https://github.com/KellerJordan/Muon/tree/f98f1cacc0263b04290753e32be8d498c1efc806) under the [MIT license](THIRD_PARTY_LICENSES.txt).
+Hybrid Muon is licensed under [Apache-2.0](LICENSE). The Newton–Schulz iteration is adapted from Keller Jordan's Muon implementation. When redistributing copies or substantial portions of that code, include its copyright and permission notices. [Upstream source](https://github.com/KellerJordan/Muon/tree/f98f1cacc0263b04290753e32be8d498c1efc806) · [Full MIT notice](THIRD_PARTY_LICENSES.txt)
+
+## How to cite
+
+If you use Hybrid Muon in your work, please credit the project in your README, model card, or paper. Include the release version or commit you used so readers can identify the implementation.
+
+> JamePeng. *Hybrid Muon*. [https://github.com/JamePeng/hybrid_muon](https://github.com/JamePeng/hybrid_muon).

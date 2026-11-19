@@ -1,6 +1,6 @@
 # Hybrid Muon
 
-A PyTorch optimizer that applies Muon and AdamW to separate parameter groups. The default rules match dense Qwen3 and Qwen3.5 models.
+A PyTorch optimizer that applies Muon and AdamW to separate parameter groups. For worked examples, see [Using Hybrid Muon with Qwen3, Qwen3.5, and Qwen3.8-27B](docs/qwen-models.md).
 
 [Package version](src/hybrid_muon/__init__.py) · Python 3.10+ · PyTorch 2.10+
 

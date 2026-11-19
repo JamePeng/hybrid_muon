@@ -1,5 +1,7 @@
 # Hybrid Muon
 
+English · [简体中文](README_zh.md)
+
 A PyTorch optimizer that applies Muon to selected projection matrices and AdamW to the remaining trainable parameters.
 
 Python 3.10+ · PyTorch 2.10+ · [Package version](src/hybrid_muon/__init__.py)

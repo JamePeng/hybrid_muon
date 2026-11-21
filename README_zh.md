@@ -70,6 +70,83 @@ print(inspect_model(model))  # Set verbose=True to list all grouped tensors.
 
 以 Qwen3.5 的多词元预测（multi-token prediction，MTP）头为例，`mtp.layers.0.self_attn.q_proj.weight` 使用 Muon，`mtp.fc.weight` 使用带衰减的 AdamW，`mtp.norm.weight` 使用零衰减 AdamW。请将已挂载 MTP 头的模型传入优化器。适配其他架构时，可用快速开始示例中的 `param_names` 核对分组。即使使用适配器（adapters），也至少要有一个匹配的投影权重参与训练，才能成功构造优化器。[Qwen3、Qwen3.5 和 Qwen3.8-27B 的层结构与预期分组数量（英文）](docs/qwen-models.md)
 
+### Qwen 检查点预检示例
+
+下面是三个本地检查点的实测结果。运行时，将目录替换为你的模型路径。
+
+```powershell
+python -m hybrid_muon inspect "/path/to/Qwen3-4B-Thinking-2507"
+python -m hybrid_muon inspect "/path/to/Qwen3.5-4B"
+python -m hybrid_muon inspect "/path/to/Qwen3.8-27B"
+```
+
+| 检查点（Checkpoint） | Muon 张量数（Muon tensors） | AdamW 有衰减张量数（AdamW decay tensors） | AdamW 无衰减张量数（AdamW no-decay tensors） | Muon 参数量占比（Muon share of stored parameters） |
+| --- | ---: | ---: | ---: | ---: |
+| Qwen3-4B-Thinking-2507 | 252 | 0 | 146 | 90.33% |
+| Qwen3.5-4B | 207 | 173 | 358 | 78.81% |
+| Qwen3.8-27B | 407 | 257 | 535 | 88.91% |
+
+Qwen3.5-4B 和 Qwen3.8-27B 的 Muon 计数均包含检查点中保存的 7 个 MTP 投影。展开模型名称可查看命令的完整默认输出。
+
+<details>
+<summary>Qwen3-4B-Thinking-2507</summary>
+
+```text
+Checkpoint: Qwen3-4B-Thinking-2507 (stored tensors; assumes all trainable)
+Group           Tensors       Parameters    Share   Default LR    Decay
+muon                252    3,633,315,840  90.33%        5e-05    0.005
+  model.layers.0.mlp.down_proj.weight  (2560, 9728)
+  model.layers.0.mlp.gate_proj.weight  (9728, 2560)
+adamw_decay           0                0   0.00%      1.5e-05     0.01
+adamw_no_decay      146      389,152,256   9.67%      1.5e-05        0
+  model.embed_tokens.weight  (151936, 2560)
+  model.layers.0.input_layernorm.weight  (2560,)
+```
+
+</details>
+
+<details>
+<summary>Qwen3.5-4B</summary>
+
+```text
+Checkpoint: Qwen3.5-4B (stored tensors; assumes all trainable)
+Group           Tensors       Parameters    Share   Default LR    Decay
+muon                207    3,672,637,440  78.81%        5e-05    0.005
+  model.language_model.layers.1.mlp.down_proj.weight  (2560, 9216)
+  model.language_model.layers.1.mlp.gate_proj.weight  (9216, 2560)
+adamw_decay         173      351,010,816   7.53%      1.5e-05     0.01
+  model.language_model.layers.0.linear_attn.conv1d.weight  (8192, 1, 4)
+  model.language_model.layers.0.linear_attn.in_proj_a.weight  (32, 2560)
+adamw_no_decay      358      636,216,832  13.65%      1.5e-05        0
+  model.language_model.embed_tokens.weight  (248320, 2560)
+  model.language_model.layers.0.input_layernorm.weight  (2560,)
+Review 24 possible fused projection(s), e.g. model.visual.blocks.0.attn.qkv.weight. Their names do not match the Muon rules; they use AdamW with decay.
+MTP: 7 matching projections. For MTP training, inspect the model with its head attached.
+```
+
+</details>
+
+<details>
+<summary>Qwen3.8-27B</summary>
+
+```text
+Checkpoint: Qwen3.8-27B (stored tensors; assumes all trainable)
+Group           Tensors       Parameters    Share   Default LR    Decay
+muon                407   24,699,207,680  88.91%        5e-05    0.005
+  mtp.layers.0.mlp.down_proj.weight  (5120, 17408)
+  mtp.layers.0.mlp.gate_proj.weight  (17408, 5120)
+adamw_decay         257      538,308,608   1.94%      1.5e-05     0.01
+  mtp.fc.weight  (5120, 10240)
+  model.language_model.layers.0.linear_attn.conv1d.weight  (10240, 1, 4)
+adamw_no_decay      535    2,543,911,664   9.16%      1.5e-05        0
+  lm_head.weight  (248320, 5120)
+  mtp.layers.0.input_layernorm.weight  (5120,)
+Review 27 possible fused projection(s), e.g. model.visual.blocks.0.attn.qkv.weight. Their names do not match the Muon rules; they use AdamW with decay.
+MTP: 7 matching projections. For MTP training, inspect the model with its head attached.
+```
+
+</details>
+
 ## 接入训练框架
 
 | 训练方式 | 接入方法 |

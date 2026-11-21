@@ -70,6 +70,83 @@ The optimizer reads `model.named_parameters()` once, skips frozen parameters, an
 
 For example, in a Qwen3.5 multi-token prediction (MTP) head, `mtp.layers.0.self_attn.q_proj.weight` matches Muon, `mtp.fc.weight` receives AdamW with decay, and `mtp.norm.weight` receives AdamW with zero decay. Pass the model that owns the attached head. For another architecture, inspect `param_names` in the quick start. Construction requires at least one trainable matching projection, including when using adapters. [Layer maps and expected group counts for Qwen3, Qwen3.5, and Qwen3.8-27B](docs/qwen-models.md)
 
+### Qwen checkpoint inspection examples
+
+These commands inspect three local checkpoints. Replace the paths with your model directories.
+
+```powershell
+python -m hybrid_muon inspect "/path/to/Qwen3-4B-Thinking-2507"
+python -m hybrid_muon inspect "/path/to/Qwen3.5-4B"
+python -m hybrid_muon inspect "/path/to/Qwen3.8-27B"
+```
+
+| Checkpoint | Muon tensors | AdamW decay tensors | AdamW no-decay tensors | Muon share of stored parameters |
+| --- | ---: | ---: | ---: | ---: |
+| Qwen3-4B-Thinking-2507 | 252 | 0 | 146 | 90.33% |
+| Qwen3.5-4B | 207 | 173 | 358 | 78.81% |
+| Qwen3.8-27B | 407 | 257 | 535 | 88.91% |
+
+The Muon counts for Qwen3.5-4B and Qwen3.8-27B each include seven MTP projections stored in the checkpoint. Expand a model to see its full default output.
+
+<details>
+<summary>Qwen3-4B-Thinking-2507</summary>
+
+```text
+Checkpoint: Qwen3-4B-Thinking-2507 (stored tensors; assumes all trainable)
+Group           Tensors       Parameters    Share   Default LR    Decay
+muon                252    3,633,315,840  90.33%        5e-05    0.005
+  model.layers.0.mlp.down_proj.weight  (2560, 9728)
+  model.layers.0.mlp.gate_proj.weight  (9728, 2560)
+adamw_decay           0                0   0.00%      1.5e-05     0.01
+adamw_no_decay      146      389,152,256   9.67%      1.5e-05        0
+  model.embed_tokens.weight  (151936, 2560)
+  model.layers.0.input_layernorm.weight  (2560,)
+```
+
+</details>
+
+<details>
+<summary>Qwen3.5-4B</summary>
+
+```text
+Checkpoint: Qwen3.5-4B (stored tensors; assumes all trainable)
+Group           Tensors       Parameters    Share   Default LR    Decay
+muon                207    3,672,637,440  78.81%        5e-05    0.005
+  model.language_model.layers.1.mlp.down_proj.weight  (2560, 9216)
+  model.language_model.layers.1.mlp.gate_proj.weight  (9216, 2560)
+adamw_decay         173      351,010,816   7.53%      1.5e-05     0.01
+  model.language_model.layers.0.linear_attn.conv1d.weight  (8192, 1, 4)
+  model.language_model.layers.0.linear_attn.in_proj_a.weight  (32, 2560)
+adamw_no_decay      358      636,216,832  13.65%      1.5e-05        0
+  model.language_model.embed_tokens.weight  (248320, 2560)
+  model.language_model.layers.0.input_layernorm.weight  (2560,)
+Review 24 possible fused projection(s), e.g. model.visual.blocks.0.attn.qkv.weight. Their names do not match the Muon rules; they use AdamW with decay.
+MTP: 7 matching projections. For MTP training, inspect the model with its head attached.
+```
+
+</details>
+
+<details>
+<summary>Qwen3.8-27B</summary>
+
+```text
+Checkpoint: Qwen3.8-27B (stored tensors; assumes all trainable)
+Group           Tensors       Parameters    Share   Default LR    Decay
+muon                407   24,699,207,680  88.91%        5e-05    0.005
+  mtp.layers.0.mlp.down_proj.weight  (5120, 17408)
+  mtp.layers.0.mlp.gate_proj.weight  (17408, 5120)
+adamw_decay         257      538,308,608   1.94%      1.5e-05     0.01
+  mtp.fc.weight  (5120, 10240)
+  model.language_model.layers.0.linear_attn.conv1d.weight  (10240, 1, 4)
+adamw_no_decay      535    2,543,911,664   9.16%      1.5e-05        0
+  lm_head.weight  (248320, 5120)
+  mtp.layers.0.input_layernorm.weight  (5120,)
+Review 27 possible fused projection(s), e.g. model.visual.blocks.0.attn.qkv.weight. Their names do not match the Muon rules; they use AdamW with decay.
+MTP: 7 matching projections. For MTP training, inspect the model with its head attached.
+```
+
+</details>
+
 ## Training integrations
 
 | Training setup | How to use the optimizer |

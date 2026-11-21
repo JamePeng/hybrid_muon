@@ -53,6 +53,15 @@ class HybridMuonAdamW(torch.optim.Optimizer):
         for projection in projections
     )
 
+    @classmethod
+    def parameter_group(cls, name, ndim):
+        """Classify a trainable parameter by its model name and rank."""
+        if ndim == 2 and ".layers." in name and name.endswith(cls.MUON_SUFFIXES):
+            return "muon"
+        if ndim <= 1 or any(s in name for s in ("norm", "bias", "embed_tokens", "lm_head")):
+            return "adamw_no_decay"
+        return "adamw_decay"
+
     def __init__(self, model, muon_config=None, adamw_lr=None, adamw_weight_decay=None):
         cfg = MUON_CONFIG.copy()
         if muon_config is not None:
@@ -86,18 +95,7 @@ class HybridMuonAdamW(torch.optim.Optimizer):
         for name, param in model.named_parameters():  # tied weights deduplicated
             if not param.requires_grad:
                 continue
-            if (
-                param.ndim == 2
-                and ".layers." in name
-                and name.endswith(self.MUON_SUFFIXES)
-            ):
-                group = "muon"
-            elif param.ndim <= 1 or any(
-                s in name for s in ("norm", "bias", "embed_tokens", "lm_head")
-            ):
-                group = "adamw_no_decay"
-            else:
-                group = "adamw_decay"
+            group = self.parameter_group(name, param.ndim)
             buckets[group].append(param)
             names[group].append(name)
         if not buckets["muon"]:

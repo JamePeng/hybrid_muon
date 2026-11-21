@@ -45,6 +45,16 @@ for group in optimizer.param_groups:
 
 ## 参数分组
 
+创建优化器之前可以先打印分组报告。即使没有投影权重匹配 Muon，也能查看原因。
+
+```python
+from hybrid_muon import inspect_model
+
+print(inspect_model(model))  # Set verbose=True to list all grouped tensors.
+```
+
+要预览本地检查点（checkpoint），先安装 `safetensors`，再运行 `python -m hybrid_muon inspect "/path/to/model"`。加上 `--verbose` 可列出所有张量的名称和形状。命令行工具只读取张量头部信息，按所有已存张量均可训练来统计。挂载可选模块或冻结层之后，用模型对象调用 `inspect_model` 即可查看实际分组。两种报告都复用优化器的分组规则，并显示默认超参数。
+
 注意力层和多层感知机（multilayer perceptron，MLP）的投影矩阵负责混合特征。Muon 对动量更新（momentum update）做近似正交化（orthogonalization），减弱最大奇异值对应方向对更新的支配作用。AdamW 则按元素调整步长，让词嵌入、归一化缩放参数和偏置根据各自的梯度统计量更新。Muon 和 AdamW 的学习率可以独立设置。[Muon 原始设计](https://kellerjordan.github.io/posts/muon/)
 
 | 层或参数（Layer or parameter） | 权重名或示例（Weight names or examples） | 参数组（Parameter group） | 默认学习率（Default LR） | 权重衰减（Weight decay） |

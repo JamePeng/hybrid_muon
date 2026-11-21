@@ -45,6 +45,16 @@ In a PyTorch loop, call `optimizer.zero_grad()`, run the forward and backward pa
 
 ## Parameter groups
 
+Preview the groups before building the optimizer, including when no projection matches:
+
+```python
+from hybrid_muon import inspect_model
+
+print(inspect_model(model))  # Set verbose=True to list all grouped tensors.
+```
+
+To inspect a local checkpoint, install `safetensors` and run `python -m hybrid_muon inspect "/path/to/model"`. Add `--verbose` for all names and shapes. The CLI reads tensor headers and assumes every stored tensor is trainable. Use the model API after attaching optional heads or freezing layers to see the actual assignments. Both reports use the optimizer's grouping rules and display its default hyperparameters.
+
 An attention or MLP projection mixes features through a matrix. Muon approximately orthogonalizes its momentum update, reducing the influence of the largest singular directions. AdamW adapts the step for each element, which lets embedding rows, normalization scales, and biases follow their own gradient statistics. The two optimizers have independent learning rates. [Original Muon design](https://kellerjordan.github.io/posts/muon/)
 
 | Layer or parameter | Weight names or examples | Group | Default LR | Weight decay |

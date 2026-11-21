@@ -267,6 +267,27 @@ trainer.train()
 
 **Memory.** At the same state precision, Muon saves one persistent buffer per selected matrix. It keeps one momentum buffer where AdamW keeps two moment buffers. Newton–Schulz iterations also use temporary memory and extra matrix multiplications. Qwen throughput and time to target loss remain unmeasured in this repository.
 
+### Qwen3.5-0.8B supervised fine-tuning
+
+Each run started from the same Qwen3.5-0.8B checkpoint on an RTX 5090, trained for one pass on 96 complete conversations (48 updates), and evaluated on 32 held-out conversations. The table reports validation negative log-likelihood weighted by supervised tokens (lower is better). Compare optimizers within a column: they share the same examples and batch order. Each length cap has its own sample split and initial NLL.
+
+| Optimizer | Projection LR | ≤512 NLL | ≤2048 NLL | ≤4096 NLL | Peak GiB at 4096 cap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Before fine-tuning | — | 1.18970 | 1.60456 | 1.72132 | — |
+| AdamW | `1.5e-5` | 1.21638 | 1.69557 | 1.78257 | 13.93 |
+| AdamW | `3e-5` | 1.43552 | 1.92559 | 2.00483 | 13.93 |
+| AdamW | `5e-5` | 1.80744 | 2.25500 | 2.35169 | 13.93 |
+| Muon | `3e-5` | 1.06699 | 1.53447 | 1.64084 | 8.83 |
+| Muon | `5e-5` | 1.06863 | 1.53550 | 1.63169 | 8.83 |
+| Hybrid | `3e-5` | 1.06278 | 1.53438 | 1.63686 | 12.07 |
+| Hybrid | `5e-5` | 1.06921 | 1.53797 | 1.63240 | 12.07 |
+
+**Reading the comparison.** At the 4096 cap and a projection LR of `3e-5`, Hybrid and AdamW updated the same 752M parameters with matched group learning rates and weight decay. Hybrid reached **1.63686** validation NLL versus **2.00483** for AdamW and used **1.85 GiB** less peak allocated memory. Projection-only Muon updated 497M parameters. At `5e-5`, Hybrid and projection-only Muon finished within **0.00071** validation NLL on these 32 held-out examples.
+
+![Training loss at projection LRs of 3e-5 and 5e-5 and final validation NLL for all 21 runs, grouped by the 512-, 2048-, and 4096-token caps](docs/benchmarks/qwen3.5-0.8b/loss-by-sequence-limit-en.png)
+
+All runs used FP32 weights, BF16 autocast, and a frozen vision encoder. Muon froze non-projection weights. Hybrid and AdamW updated the other trainable weights at `1.5e-5`. Each round used one seed and processed 30,358, 80,455, or 124,910 supervised training tokens, respectively. The longer runs used activation checkpointing and the 4096-cap runs also chunked the output loss, so compare memory within a round. [Download metrics and per-step training loss for all 21 runs (JSON)](docs/benchmarks/qwen3.5-0.8b/results.json)
+
 ### Loop transformer experiments
 
 During his loop transformer research, JamePeng compared an earlier hybrid implementation with AdamW on a **309M-parameter recurrent language model**. At the same matrix learning rate of `5e-5`, the hybrid run used **207.6 MiB less peak GPU memory**. Removing one FP32 buffer across the 54,525,952 selected parameters predicts a saving of **208.0 MiB**.

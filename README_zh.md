@@ -4,7 +4,7 @@
 
 这个 PyTorch 优化器（optimizer）按参数分组：选定的投影矩阵（projection matrices）使用 Muon，其余可训练参数（trainable parameters）使用 AdamW。
 
-Python 3.10+ · PyTorch 2.10+ · [包版本](src/hybrid_muon/__init__.py)
+Python 3.10+ · PyTorch 2.10+ · [当前版本](src/hybrid_muon/__init__.py) · [更新日志（Changelog）](changelog.md)
 
 [快速开始](#快速开始) · [参数分组](#参数分组) · [接入训练框架](#接入训练框架) · [性能](#性能) · [Qwen 模型指南（英文）](docs/qwen-models.md)
 
